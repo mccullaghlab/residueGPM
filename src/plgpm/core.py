@@ -37,6 +37,16 @@ class EvaluationResult:
     N: int
 
 
+@dataclass
+class AnalysisBundle:
+    coupling: np.ndarray
+    samples: np.ndarray
+    mi_data: np.ndarray
+    mi_model: np.ndarray
+    mi_summary: Dict[str, float]
+    pair: Optional[Dict[str, Any]]
+
+
 class PLGPM:
     """
     Pseudo-likelihood Generalized Potts Model for discrete multivariate data.
@@ -86,6 +96,14 @@ class PLGPM:
     def _check_fitted(self) -> None:
         if not self.is_fitted or self.models is None or self.slices is None:
             raise RuntimeError("Model is not fitted. Call fit(...) first.")
+
+    def _validate_external_states(self, S: ArrayLikeInt, name: str) -> np.ndarray:
+        S = self._validate_S(S)
+        if S.shape[1] != len(self.K_list):
+            raise ValueError(
+                f"{name} has {S.shape[1]} columns but len(K_list) = {len(self.K_list)}."
+            )
+        return S
 
     # -------------------------------------------------------------------------
     # one-hot construction
@@ -472,4 +490,74 @@ class PLGPM:
             N=int(N),
         )
 
+    # -------------------------------------------------------------------------
+    # analysis convenience API
+    # -------------------------------------------------------------------------
+
+    def analyze(
+        self,
+        data_states: ArrayLikeInt,
+        model_samples: Optional[ArrayLikeInt] = None,
+        pair: Optional[Tuple[int, int]] = None,
+        pseudocount: float = 0.0,
+        sample_kwargs: Optional[Dict[str, Any]] = None,
+    ) -> AnalysisBundle:
+        """
+        Build a compact bundle of common post-fit analysis products.
+
+        Parameters
+        ----------
+        data_states
+            Empirical state trajectories, shape (T, N).
+        model_samples
+            Optional pre-generated model samples. If omitted, samples are drawn
+            via ``sample_kwargs``.
+        pair
+            Optional variable pair ``(a, b)`` for joint probability comparison.
+        pseudocount
+            Pseudocount used in MI calculations.
+        sample_kwargs
+            Arguments passed to ``sample(...)`` if ``model_samples`` is None.
+        """
+        self._check_fitted()
+        data_states = self._validate_external_states(data_states, "data_states")
+
+        if model_samples is None:
+            model_samples = self.sample(**({} if sample_kwargs is None else sample_kwargs))
+        model_samples = self._validate_external_states(model_samples, "model_samples")
+
+        from . import mi as mi_utils
+
+        coupling = self.coupling_matrix()
+        mi_data = mi_utils.compute_mi_matrix(
+            data_states, K_list=self.K_list, pseudocount=pseudocount
+        )
+        mi_model = mi_utils.compute_mi_matrix(
+            model_samples, K_list=self.K_list, pseudocount=pseudocount
+        )
+        mi_summary = mi_utils.summarize_mi_agreement(mi_data, mi_model)
+
+        pair_result = None
+        if pair is not None:
+            a, b = pair
+            C_model = self.joint_counts(model_samples, self.K_list, a, b)
+            C_data = self.joint_counts(data_states, self.K_list, a, b)
+            P_model = self.prob_from_counts(C_model)
+            P_data = self.prob_from_counts(C_data)
+            pair_result = {
+                "pair": (a, b),
+                "counts_model": C_model,
+                "counts_data": C_data,
+                "prob_model": P_model,
+                "prob_data": P_data,
+            }
+
+        return AnalysisBundle(
+            coupling=coupling,
+            samples=model_samples,
+            mi_data=mi_data,
+            mi_model=mi_model,
+            mi_summary=mi_summary,
+            pair=pair_result,
+        )
 
