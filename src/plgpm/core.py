@@ -65,6 +65,7 @@ class PLGPM:
 
         self.models: Optional[List[Tuple[Optional[LogisticRegression], Optional[np.ndarray]]]] = None
         self.slices: Optional[List[slice]] = None
+        self._conditional_cache: Optional[List[Optional[Dict[str, Any]]]] = None
         self.is_fitted: bool = False
 
     # -------------------------------------------------------------------------
@@ -94,7 +95,12 @@ class PLGPM:
         return S.astype(np.int64, copy=False)
 
     def _check_fitted(self) -> None:
-        if not self.is_fitted or self.models is None or self.slices is None:
+        if (
+            not self.is_fitted
+            or self.models is None
+            or self.slices is None
+            or self._conditional_cache is None
+        ):
             raise RuntimeError("Model is not fitted. Call fit(...) first.")
 
     def _validate_external_states(self, S: ArrayLikeInt, name: str) -> np.ndarray:
@@ -180,8 +186,39 @@ class PLGPM:
 
         self.models = models
         self.slices = slices
+        self._conditional_cache = self._build_conditional_cache()
         self.is_fitted = True
         return self
+
+    def _build_conditional_cache(self) -> List[Optional[Dict[str, Any]]]:
+        self._check_fitted_inputs()
+        D = self.slices[-1].stop
+        cache: List[Optional[Dict[str, Any]]] = []
+
+        for i, (clf, mask) in enumerate(self.models):
+            Ki = self.K_list[i]
+            if clf is None or mask is None or Ki <= 1:
+                cache.append(None)
+                continue
+
+            W = np.asarray(clf.coef_, dtype=np.float64)
+            b = np.asarray(clf.intercept_, dtype=np.float64)
+            classes = np.asarray(clf.classes_, dtype=np.int64)
+
+            W_full = np.zeros((W.shape[0], D), dtype=np.float64)
+            W_full[:, np.where(mask)[0]] = W
+
+            blocks = []
+            for j, sl in enumerate(self.slices):
+                blocks.append(None if j == i else W_full[:, sl.start:sl.stop].copy())
+
+            cache.append({"blocks": blocks, "intercept": b, "classes": classes})
+
+        return cache
+
+    def _check_fitted_inputs(self) -> None:
+        if self.models is None or self.slices is None:
+            raise RuntimeError("Model internals are unavailable.")
 
     # -------------------------------------------------------------------------
     # conditional probabilities and sampling
@@ -211,19 +248,41 @@ class PLGPM:
     def conditional_probs(self, i: int, state_vec: Sequence[int]) -> np.ndarray:
         self._check_fitted()
         state_vec = np.asarray(state_vec, dtype=np.int64)
+        return self._conditional_probs_fast(i, state_vec)
 
-        clf, mask = self.models[i]
+    def _conditional_probs_fast(self, i: int, state_vec: np.ndarray) -> np.ndarray:
         Ki = self.K_list[i]
-
-        if clf is None or Ki <= 1:
+        if Ki <= 1:
             p = np.zeros(Ki, dtype=float)
             if Ki > 0:
                 p[0] = 1.0
             return p
 
-        X_full = self._onehot_row_from_state(state_vec, self.slices, self.K_list)
-        X_red = X_full[:, mask]
-        p = clf.predict_proba(X_red).reshape(-1)
+        node_cache = self._conditional_cache[i]
+        if node_cache is None:
+            p = np.zeros(Ki, dtype=float)
+            p[0] = 1.0
+            return p
+
+        scores = node_cache["intercept"].astype(np.float64, copy=True)
+        for j, block in enumerate(node_cache["blocks"]):
+            if block is None:
+                continue
+            scores += block[:, int(state_vec[j])]
+
+        p_present = np.empty_like(scores, dtype=np.float64)
+        if scores.shape[0] == 1:
+            s = float(scores[0])
+            p1 = 1.0 / (1.0 + np.exp(-s))
+            p_present = np.array([1.0 - p1, p1], dtype=np.float64)
+        else:
+            scores = scores - np.max(scores)
+            np.exp(scores, out=p_present)
+            p_present /= np.sum(p_present)
+
+        p = np.zeros(Ki, dtype=np.float64)
+        classes = node_cache["classes"]
+        p[classes] = p_present
         p = np.clip(p, 1e-15, 1.0)
         p /= p.sum()
         return p
@@ -262,8 +321,8 @@ class PLGPM:
                 Ki = self.K_list[i]
                 if Ki <= 1:
                     continue
-                p = self.conditional_probs(i, state)
-                state[i] = rng.choice(Ki, p=p)
+                p = self._conditional_probs_fast(i, state)
+                state[i] = np.searchsorted(np.cumsum(p), rng.random(), side="right")
 
             if t >= burn and ((t - burn) % thin == 0):
                 kept.append(state.copy())
@@ -560,4 +619,3 @@ class PLGPM:
             mi_summary=mi_summary,
             pair=pair_result,
         )
-
