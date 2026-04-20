@@ -65,3 +65,33 @@ def plot_coupling_heatmap(
 
     plt.tight_layout()
     return fig, ax, order
+
+
+def plot_probability_heatmap(
+    P,
+    title="Joint probability",
+    xlabel="State of variable b",
+    ylabel="State of variable a",
+    cmap="viridis",
+    vmin=0.0,
+    vmax=None,
+    figsize=(4.5, 4.0),
+    show_colorbar=True,
+):
+    """
+    Plot a 2D probability table as a heatmap.
+    """
+    P = np.asarray(P, dtype=float)
+
+    fig, ax = plt.subplots(figsize=figsize, dpi=150)
+    im = ax.imshow(P, origin="lower", aspect="auto", cmap=cmap, vmin=vmin, vmax=vmax)
+    ax.set_title(title)
+    ax.set_xlabel(xlabel)
+    ax.set_ylabel(ylabel)
+
+    if show_colorbar:
+        cb = plt.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
+        cb.set_label("Probability")
+
+    plt.tight_layout()
+    return fig, ax
