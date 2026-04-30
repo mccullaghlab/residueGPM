@@ -15,4 +15,4 @@ dist
 debug
 # pycache
 __pycache__
-
+*.egg-info/
