@@ -1,0 +1,14 @@
+LICENSE
+README.md
+pyproject.toml
+src/plgpm/__init__.py
+src/plgpm/core.py
+src/plgpm/example.py
+src/plgpm/mi.py
+src/plgpm/plots.py
+src/plgpm.egg-info/PKG-INFO
+src/plgpm.egg-info/SOURCES.txt
+src/plgpm.egg-info/dependency_links.txt
+src/plgpm.egg-info/requires.txt
+src/plgpm.egg-info/top_level.txt
+tests/test_core.py
