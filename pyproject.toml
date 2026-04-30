@@ -10,7 +10,7 @@ readme = "README.md"
 requires-python = ">=3.10"
 license = {text = "MIT"}
 authors = [
-  {name = "Martin McCullagh"}
+  {name = "Martin McCullagh", email = "martin.mccullagh@okstate.edu" }
 ]
 keywords = ["mrf", "markov-random-field", "potts-model", "graphical-models", "pseudo-likelihood"]
 classifiers = [
@@ -39,6 +39,11 @@ dev = [
   "twine>=5.0",
   "ruff>=0.6",
 ]
+
+[project.urls]
+Homepage = "https://github.com/mccullaghlab/residueGPM"
+Repository = "https://github.com/mccullaghlab/residueGPM"
+Issues = "https://github.com/mccullaghlab/residueGPM/issues"
 
 [tool.setuptools]
 package-dir = {"" = "src"}
